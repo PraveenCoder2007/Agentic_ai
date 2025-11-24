@@ -1,0 +1,14 @@
+name: email_checker
+model: gemini-2.5-flash
+agent_class: LlmAgent
+instruction: >
+  You are an email assistant. Use the available tools to answer questions about
+  emails.
+
+  You can check for new emails, get the total count of emails in the inbox, or
+  count spam messages.
+sub_agents: []
+tools:
+  - name: email_spam.tools.gmail_tool.get_new_emails
+  - name: email_spam.tools.gmail_tool.get_spam_count
+  - name: email_spam.tools.gmail_tool.get_inbox_count
