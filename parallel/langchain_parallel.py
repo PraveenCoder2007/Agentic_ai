@@ -1,103 +1,74 @@
 import os
 import asyncio
-from typing import Optional
+from typing import Dict, Any
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import Runnable, RunnableParallel, RunnablePassthrough
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+model = genai.GenerativeModel('gemini-2.0-flash')
 
-# --- Configuration ---
-# Ensure your API key environment variable is set (e.g., GOOGLE_API_KEY)
-try:
-    llm: Optional[ChatGoogleGenerativeAI] = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash", 
-        temperature=0.7
-    )
-except Exception as e:
-    print(f"Error initializing language model: {e}")
-    llm = None
+# --- Parallel Processing Functions ---
+async def summarize_topic(topic: str) -> str:
+    """Summarize the topic concisely."""
+    prompt = f"Summarize the following topic concisely: {topic}"
+    response = await model.generate_content_async(prompt)
+    return response.text
 
-# --- Define Independent Chains ---
-# These three chains represent distinct tasks that can be executed in parallel.
+async def generate_questions(topic: str) -> str:
+    """Generate three interesting questions about the topic."""
+    prompt = f"Generate three interesting questions about the following topic: {topic}"
+    response = await model.generate_content_async(prompt)
+    return response.text
 
-summarize_chain: Runnable = (
-    ChatPromptTemplate.from_messages([
-        ("system", "Summarize the following topic concisely:"),
-        ("user", "{topic}")
-    ])
-    | llm
-    | StrOutputParser()
-)
+async def extract_key_terms(topic: str) -> str:
+    """Identify 5-10 key terms from the topic."""
+    prompt = f"Identify 5-10 key terms from the following topic, separated by commas: {topic}"
+    response = await model.generate_content_async(prompt)
+    return response.text
 
-questions_chain: Runnable = (
-    ChatPromptTemplate.from_messages([
-        ("system", "Generate three interesting questions about the following topic:"),
-        ("user", "{topic}")
-    ])
-    | llm
-    | StrOutputParser()
-)
-
-terms_chain: Runnable = (
-    ChatPromptTemplate.from_messages([
-        ("system", "Identify 5-10 key terms from the following topic, separated by commas:"),
-        ("user", "{topic}")
-    ])
-    | llm
-    | StrOutputParser()
-)
-
-# --- Build the Parallel + Synthesis Chain ---
-# 1. Define the block of tasks to run in parallel. The results of these,
-#    along with the original topic, will be fed into the next step.
-map_chain = RunnableParallel(
-    {
-        "summary": summarize_chain,
-        "questions": questions_chain,
-        "key_terms": terms_chain,
-        "topic": RunnablePassthrough(),  # Pass the original topic through
-    }
-)
-
-# 2. Define the final synthesis prompt which will combine the parallel results.
-synthesis_prompt = ChatPromptTemplate.from_messages([
-    ("system", """Based on the following information:
+async def synthesize_results(topic: str, summary: str, questions: str, key_terms: str) -> str:
+    """Synthesize all results into a comprehensive answer."""
+    prompt = f"""Based on the following information:
     Summary: {summary}
     Related Questions: {questions}
     Key Terms: {key_terms}
-    Synthesize a comprehensive answer."""),
-    ("user", "Original topic: {topic}")
-])
+    
+    Synthesize a comprehensive answer about: {topic}"""
+    
+    response = await model.generate_content_async(prompt)
+    return response.text
 
-# 3. Construct the full chain by piping the parallel results directly
-#    into the synthesis prompt, followed by the LLM and output parser.
-full_parallel_chain = map_chain | synthesis_prompt | llm | StrOutputParser()
-
-# --- Run the Chain ---
+# --- Run Parallel Processing ---
 async def run_parallel_example(topic: str) -> None:
     """
-    Asynchronously invokes the parallel processing chain with a specific topic
-    and prints the synthesized result.
+    Run parallel processing tasks and synthesize results.
     Args:
-        topic: The input topic to be processed by the LangChain chains.
+        topic: The input topic to be processed.
     """
-    if not llm:
-        print("LLM not initialized. Cannot run example.")
-        return
+    print(f"\n--- Running Parallel Processing for Topic: '{topic}' ---")
     
-    print(f"\n--- Running Parallel LangChain Example for Topic: '{topic}' ---")
     try:
-        # The input to 'ainvoke' is the single 'topic' string,
-        # then passed to each runnable in the 'map_chain'.
-        response = await full_parallel_chain.ainvoke(topic)
+        print("🔄 Running parallel tasks...")
+        
+        # Run three tasks in parallel using asyncio.gather
+        summary, questions, key_terms = await asyncio.gather(
+            summarize_topic(topic),
+            generate_questions(topic),
+            extract_key_terms(topic)
+        )
+        
+        print("✅ Parallel tasks completed. Synthesizing results...")
+        
+        # Synthesize the results
+        final_result = await synthesize_results(topic, summary, questions, key_terms)
+        
         print("\n--- Final Response ---")
-        print(response)
+        print(final_result)
+        
     except Exception as e:
-        print(f"\nAn error occurred during chain execution: {e}")
+        print(f"\nAn error occurred: {e}")
 
 if __name__ == "__main__":
     test_topic = "The history of space exploration"

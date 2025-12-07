@@ -1,0 +1,4 @@
+google-adk
+google-genai
+nest-asyncio
+python-dotenv
